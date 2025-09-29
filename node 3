@@ -1,0 +1,85 @@
+const express = require("express");
+const path = require("path");
+const app = express();
+const PORT = 3000;
+
+app.use(express.static(path.join(__dirname, "../public")));
+
+const seats = {};
+const TOTAL_SEATS = 10;
+
+for (let i = 1; i <= TOTAL_SEATS; i++) {
+  seats[i] = { status: "available", lockedBy: null, lockTimer: null };
+}
+
+function setLockExpiry(seatId, userId) {
+  seats[seatId].lockTimer = setTimeout(() => {
+    if (seats[seatId].status === "locked" && seats[seatId].lockedBy === userId) {
+      seats[seatId].status = "available";
+      seats[seatId].lockedBy = null;
+      seats[seatId].lockTimer = null;
+      console.log(`Lock expired for Seat ${seatId}`);
+    }
+  }, 60000); // 1 minute expiry
+}
+
+app.get("/seats", (req, res) => {
+  res.json(seats);
+});
+
+app.post("/lock/:seatId", (req, res) => {
+  const { seatId } = req.params;
+  const userId = req.query.user || "anonymous";
+
+  if (!seats[seatId]) return res.status(404).json({ error: "Seat not found" });
+  if (seats[seatId].status === "booked") return res.status(400).json({ error: "Seat already booked" });
+  if (seats[seatId].status === "locked" && seats[seatId].lockedBy !== userId)
+    return res.status(400).json({ error: "Seat already locked by another user" });
+
+  clearTimeout(seats[seatId].lockTimer);
+  seats[seatId].status = "locked";
+  seats[seatId].lockedBy = userId;
+  setLockExpiry(seatId, userId);
+
+  return res.json({ message: `Seat ${seatId} locked for ${userId}` });
+});
+
+app.post("/confirm/:seatId", (req, res) => {
+  const { seatId } = req.params;
+  const userId = req.query.user || "anonymous";
+
+  if (!seats[seatId]) return res.status(404).json({ error: "Seat not found" });
+  if (seats[seatId].status === "booked") return res.status(400).json({ error: "Seat already booked" });
+
+  if (seats[seatId].status === "locked" && seats[seatId].lockedBy === userId) {
+    clearTimeout(seats[seatId].lockTimer);
+    seats[seatId].status = "booked";
+    seats[seatId].lockedBy = userId;
+    return res.json({ message: `Seat ${seatId} successfully booked by ${userId}` });
+  }
+
+  return res.status(400).json({ error: "Seat not locked by this user or lock expired" });
+});
+
+app.post("/release/:seatId", (req, res) => {
+  const { seatId } = req.params;
+  const userId = req.query.user || "anonymous";
+
+  if (!seats[seatId]) return res.status(404).json({ error: "Seat not found" });
+
+  if (seats[seatId].status === "locked" && seats[seatId].lockedBy === userId) {
+    clearTimeout(seats[seatId].lockTimer);
+    seats[seatId].status = "available";
+    seats[seatId].lockedBy = null;
+    return res.json({ message: `Seat ${seatId} released by ${userId}` });
+  }
+
+  return res.status(400).json({ error: "Cannot release seat (not locked by this user)" });
+});
+
+
+app.get("/", (req, res) => {
+  res.sendFile(path.join(__dirname, "../public/index.html"));
+});
+
+app.listen(PORT, () => console.log(`✅ Server running on http://localhost:${PORT}`));
